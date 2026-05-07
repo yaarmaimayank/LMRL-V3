@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}My Panel — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+
+  <div class="doctor-banner fu">
+    <div class="banner-icon">🩺</div>
+    <div>
+      <div class="banner-title">My Panel</div>
+      <div class="banner-sub">Welcome, {{ current_user.username }}. Your patients and activity at a glance.</div>
+    </div>
+    <div class="banner-actions">
+      <a href="{{ url_for('add_patient') }}" class="btn btn-banner-white btn-sm">+ New Patient</a>
+      <a href="{{ url_for('index') }}" class="btn btn-banner btn-sm">← Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid fu fu2">
+    <div class="stat-card"><div class="stat-icon blue">🧑‍🤝‍🧑</div><div><div class="stat-value">{{ stats.patients }}</div><div class="stat-label">My Patients</div></div></div>
+    <div class="stat-card"><div class="stat-icon teal">📋</div><div><div class="stat-value">{{ stats.records }}</div><div class="stat-label">Records Added</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">💊</div><div><div class="stat-value">{{ stats.rx }}</div><div class="stat-label">Prescriptions</div></div></div>
+  </div>
+
+  <div class="two-col fu fu3">
+
+    <!-- My Patients -->
+    <div>
+      <div class="page-header" style="margin-bottom:1rem">
+        <div><div class="page-title" style="font-size:1.2rem">My Patients</div></div>
+        <a href="{{ url_for('add_patient') }}" class="btn btn-primary btn-sm">+ Add</a>
+      </div>
+      {% if my_patients %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>DOB</th><th>Records</th><th></th></tr></thead>
+          <tbody>
+            {% for p in my_patients %}
+            <tr>
+              <td>
+                <a href="{{ url_for('patient_detail', pid=p.id) }}">{{ p.name }}</a>
+                {% if p.blood_group %}<span class="badge badge-red" style="margin-left:5px">{{ p.blood_group }}</span>{% endif %}
+              </td>
+              <td class="muted">{{ p.dob }}</td>
+              <td><span class="badge badge-blue">{{ p.rc }}</span></td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <a href="{{ url_for('patient_detail', pid=p.id) }}" class="btn btn-outline btn-xs">View</a>
+                  <a href="{{ url_for('add_record', pid=p.id) }}" class="btn btn-primary btn-xs">+ Record</a>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card"><div class="empty"><div class="empty-icon">👤</div><div class="empty-text">No patients added yet.<br><a href="{{ url_for('add_patient') }}" style="color:var(--primary)">Add your first patient →</a></div></div></div>
+      {% endif %}
+    </div>
+
+    <!-- Recent Activity -->
+    <div>
+      <div class="page-header" style="margin-bottom:1rem">
+        <div><div class="page-title" style="font-size:1.2rem">Recent Records</div></div>
+      </div>
+      {% if recent_records %}
+        {% for r in recent_records %}
+        {% set parts = r.visit_date.split('-') if r.visit_date and '-' in r.visit_date else ['','',''] %}
+        {% set months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+        <div class="rec-card" style="margin-bottom:.6rem">
+          <div class="rec-date"><div class="rec-day">{{ parts[2] }}</div><div class="rec-mon">{{ months[parts[1]|int] if parts[1] else '' }}</div></div>
+          <div class="rec-body">
+            <div class="rec-diag">{{ r.diagnosis or 'General Visit' }}</div>
+            <div class="rec-prov">Patient: <a href="{{ url_for('patient_detail', pid=r.patient_id) }}">{{ r.pname }}</a></div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="card"><div class="empty" style="padding:1.5rem"><div class="empty-text">No records yet.</div></div></div>
+      {% endif %}
+
+      <div class="page-header" style="margin-bottom:1rem;margin-top:1.5rem">
+        <div><div class="page-title" style="font-size:1.2rem">Recent Prescriptions</div></div>
+      </div>
+      {% if recent_rx %}
+        {% for rx in recent_rx %}
+        <div class="rx-card" style="margin-bottom:.6rem">
+          <div class="rx-drug">💊 {{ rx.drug_name }}</div>
+          <div class="rx-details">
+            {% if rx.dosage %}<span>{{ rx.dosage }}</span>{% endif %}
+            {% if rx.frequency %}<span>{{ rx.frequency }}</span>{% endif %}
+            <span>→ <a href="{{ url_for('patient_detail', pid=rx.patient_id) }}" style="color:var(--primary)">{{ rx.pname }}</a></span>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="card"><div class="empty" style="padding:1.5rem"><div class="empty-text">No prescriptions yet.</div></div></div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

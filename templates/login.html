@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Sign In — LMRL</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f6ef7'/><text x='16' y='22' text-anchor='middle' font-size='18'>⚕</text></svg>">
+</head>
+<body class="auth-body">
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+<div class="flash-wrap" id="flashWrap">{% for c,m in messages %}<div class="flash flash-{{c}}">{{ '✓' if c=='success' else '!' }} {{m}}</div>{% endfor %}</div>
+{% endif %}{% endwith %}
+
+<div class="auth-wrap">
+  <div class="auth-logo fu">
+    <div class="auth-logo-icon">⚕</div>
+    <h1>Lifelong Medical Records</h1>
+    <p>Sign in to access the system</p>
+  </div>
+  <div class="auth-card fu fu2">
+    <div class="auth-title">Welcome back</div>
+    <form method="POST" autocomplete="on">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <div class="fg">
+        <label>Username or Email</label>
+        <input class="form-input" type="text" name="username" placeholder="Enter your username or email" required autofocus autocomplete="username">
+      </div>
+      <div class="fg">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input class="form-input" type="password" name="password" id="pw" placeholder="Enter your password" required autocomplete="current-password">
+          <button type="button" class="pw-toggle" onclick="tp('pw')">👁</button>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-wide" style="margin-top:.25rem">Sign In →</button>
+    </form>
+    <div class="auth-divider">or</div>
+    <a href="{{ url_for('register') }}" class="btn btn-outline btn-wide">Create an account</a>
+    <div class="security-note">🔒 Secured with PBKDF2-SHA256 · CSRF protected · Rate-limited</div>
+  </div>
+  <div class="auth-footer fu fu3">Don't have an account? <a href="{{ url_for('register') }}">Register here</a></div>
+</div>
+<script>
+function tp(id){const f=document.getElementById(id);f.type=f.type==='password'?'text':'password';}
+setTimeout(()=>{const fw=document.getElementById('flashWrap');if(fw){fw.style.transition='opacity .4s';fw.style.opacity='0';setTimeout(()=>fw.remove(),400);}},4200);
+</script>
+</body></html>

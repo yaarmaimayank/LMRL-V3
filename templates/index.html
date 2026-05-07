@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero fu">
+    <div class="hero-tag">🏥 LMRL System</div>
+    <div class="hero-title">Lifelong Medical Records Ledger</div>
+    <div class="hero-desc">A secure platform to store and manage patients' complete medical history — from birth to death — in one place.</div>
+    <div class="hero-actions">
+      {% if can_write %}
+      <a href="{{ url_for('add_patient') }}" class="btn btn-hero-primary">+ Add Patient</a>
+      <a href="{{ url_for('doctor_panel') }}" class="btn btn-hero-outline">My Panel</a>
+      {% else %}
+      <span style="background:rgba(255,255,255,0.2);border-radius:6px;padding:6px 14px;font-size:13px">👁 View-only access — contact an Admin to upgrade your role</span>
+      {% endif %}
+      {% if is_admin %}<a href="{{ url_for('admin_panel') }}" class="btn btn-hero-outline">🛡 Admin Panel</a>{% endif %}
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid fu fu2">
+    <div class="stat-card">
+      <div class="stat-icon blue">🧑‍🤝‍🧑</div>
+      <div><div class="stat-value">{{ stats.patients }}</div><div class="stat-label">Patients</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon teal">📋</div>
+      <div><div class="stat-value">{{ stats.records }}</div><div class="stat-label">Records</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">💊</div>
+      <div><div class="stat-value">{{ stats.rx }}</div><div class="stat-label">Prescriptions</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon purple">👥</div>
+      <div><div class="stat-value">{{ stats.users }}</div><div class="stat-label">Staff Accounts</div></div>
+    </div>
+  </div>
+
+  <!-- Patient list -->
+  <div class="page-header fu fu3">
+    <div>
+      <div class="page-title">Patient Registry</div>
+      <div class="page-sub">All registered patients in the system</div>
+    </div>
+    {% if can_write %}<a href="{{ url_for('add_patient') }}" class="btn btn-primary">+ Add Patient</a>{% endif %}
+  </div>
+
+  {% if patients %}
+  <div class="table-wrap fu fu4">
+    <table>
+      <thead>
+        <tr><th>Patient Name</th><th>UID</th><th>Date of Birth</th><th>Blood</th><th>Phone</th><th>Registered</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for p in patients %}
+        <tr>
+          <td><a href="{{ url_for('patient_detail', pid=p.id) }}">{{ p.name }}</a></td>
+          <td class="muted" style="font-family:monospace;font-size:11.5px">{{ p.id[:14] }}…</td>
+          <td class="muted">{{ p.dob }}</td>
+          <td>{% if p.blood_group %}<span class="badge badge-red">{{ p.blood_group }}</span>{% else %}—{% endif %}</td>
+          <td class="muted">{{ p.phone or '—' }}</td>
+          <td class="muted">{{ p.created_at[:10] if p.created_at else '—' }}</td>
+          <td><a href="{{ url_for('patient_detail', pid=p.id) }}" class="btn btn-outline btn-sm">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card fu fu3">
+    <div class="empty">
+      <div class="empty-icon">🏥</div>
+      <div class="empty-text">No patients registered yet.
+        {% if can_write %}<br><a href="{{ url_for('add_patient') }}" style="color:var(--primary)">Add the first patient →</a>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

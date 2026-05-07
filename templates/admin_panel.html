@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+
+  <div class="admin-banner fu">
+    <div class="banner-icon">🛡</div>
+    <div>
+      <div class="banner-title">Admin Control Panel</div>
+      <div class="banner-sub">Manage users, roles, and monitor all system activity.</div>
+    </div>
+    <div class="banner-actions">
+      <a href="{{ url_for('index') }}" class="btn btn-banner btn-sm">← Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid fu fu2">
+    <div class="stat-card"><div class="stat-icon purple">👥</div><div><div class="stat-value">{{ stats.users }}</div><div class="stat-label">Total Users</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">🧑‍🤝‍🧑</div><div><div class="stat-value">{{ stats.patients }}</div><div class="stat-label">Patients</div></div></div>
+    <div class="stat-card"><div class="stat-icon teal">📋</div><div><div class="stat-value">{{ stats.records }}</div><div class="stat-label">Records</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">💊</div><div><div class="stat-value">{{ stats.rx }}</div><div class="stat-label">Prescriptions</div></div></div>
+  </div>
+
+  <!-- Users -->
+  <div class="page-header fu fu3">
+    <div><div class="page-title">User Management</div><div class="page-sub">Control access, roles, and accounts</div></div>
+  </div>
+
+  <div class="table-wrap fu fu3" style="margin-bottom:2rem">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Last Login</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="muted" style="font-family:monospace">{{ u.id }}</td>
+          <td>
+            <strong>{{ u.username }}</strong>
+            {% if u.id == current_user.id %}<span class="badge badge-teal" style="margin-left:5px">You</span>{% endif %}
+          </td>
+          <td class="muted">{{ u.email }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('admin_role', uid=u.id) }}" style="display:flex;gap:5px;align-items:center">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <select name="role" class="form-select" style="padding:4px 8px;font-size:12px;width:auto;border-radius:5px">
+                {% for r in ['viewer','doctor','nurse','admin'] %}
+                <option value="{{ r }}" {% if u.role==r %}selected{% endif %}>{{ r|title }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-outline btn-xs">Set</button>
+            </form>
+          </td>
+          <td>
+            <span class="badge {{ 'badge-green' if u.is_active else 'badge-red' }}">
+              {{ 'Active' if u.is_active else 'Inactive' }}
+            </span>
+          </td>
+          <td class="muted">{{ u.created_at[:10] if u.created_at else '—' }}</td>
+          <td class="muted">{{ u.last_login[:10] if u.last_login else 'Never' }}</td>
+          <td>
+            {% if u.id != current_user.id %}
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <form method="POST" action="{{ url_for('admin_toggle', uid=u.id) }}" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-xs {{ 'btn-danger' if u.is_active else 'btn-success' }}"
+                        onclick="return confirm('{{ 'Disable' if u.is_active else 'Enable' }} {{ u.username }}?')">
+                  {{ '🔒 Disable' if u.is_active else '🔓 Enable' }}
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('admin_delete', uid=u.id) }}" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-xs btn-danger"
+                        onclick="return confirm('Permanently DELETE {{ u.username }}? This cannot be undone.')">
+                  🗑 Delete
+                </button>
+              </form>
+            </div>
+            {% else %}
+            <span class="muted" style="font-size:12px">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Audit Log -->
+  <div class="page-header fu">
+    <div><div class="page-title">Audit Log</div><div class="page-sub">Last 120 system events</div></div>
+  </div>
+  <div class="table-wrap fu fu2">
+    <table>
+      <thead><tr><th>Time (UTC)</th><th>User</th><th>Action</th><th>Target</th><th>IP</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="muted" style="white-space:nowrap;font-size:12.5px">{{ log.created_at[:19].replace('T',' ') if log.created_at else '—' }}</td>
+          <td>{{ log.username or '—' }}</td>
+          <td class="audit-action {% if 'FAIL' in log.action or 'DENIED' in log.action or 'DELETE' in log.action %}audit-fail{% endif %}">
+            {{ log.action }}
+          </td>
+          <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">{{ log.target or '—' }}</td>
+          <td class="muted" style="font-family:monospace;font-size:12px">{{ log.ip or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% if not logs %}
+        <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No audit events yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}My Profile — LMRL{% endblock %}
+{% block content %}
+<div class="container" style="max-width:960px">
+  <div class="page-header fu">
+    <div><div class="page-title">My Profile</div><div class="page-sub">Account settings and security</div></div>
+    <a href="{{ url_for('index') }}" class="btn btn-outline">← Dashboard</a>
+  </div>
+
+  <div class="two-col fu fu2">
+
+    <!-- Left: identity -->
+    <div style="display:flex;flex-direction:column;gap:1.25rem">
+      <div class="card" style="text-align:center;padding:2rem">
+        <div style="width:72px;height:72px;background:var(--primary-bg);border-radius:50%;display:inline-grid;place-items:center;font-size:2.2rem;margin-bottom:1rem;border:2px solid var(--border)">
+          {% if user.role=='admin' %}🛡{% elif user.role=='nurse' %}👩‍⚕️{% elif user.role=='doctor' %}👨‍⚕️{% else %}👁{% endif %}
+        </div>
+        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">{{ user.username }}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:4px">{{ user.email }}</div>
+        <div style="margin-top:.75rem">
+          <span class="badge {% if user.role=='admin' %}badge-purple{% elif user.role=='viewer' %}badge-grey{% else %}badge-blue{% endif %}">{{ user.role|title }}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px;margin-top:.75rem">
+          Joined: {{ user.created_at[:10] if user.created_at else '—' }}<br>
+          {% if user.last_login %}Last login: {{ user.last_login[:10] }}{% endif %}
+        </div>
+        {% if user.role == 'viewer' %}
+        <div style="margin-top:1rem;background:var(--warning-bg);border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12.5px;color:var(--warning)">
+          👁 View-only role. Contact an Admin to upgrade your access.
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">📊 My Activity</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;text-align:center">
+            <div style="font-size:1.8rem;font-weight:700;color:var(--primary)">{{ my_patients }}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Patients</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;text-align:center">
+            <div style="font-size:1.8rem;font-weight:700;color:var(--teal)">{{ my_records }}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Records</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: forms -->
+    <div style="display:flex;flex-direction:column;gap:1.25rem">
+      <div class="card">
+        <div class="card-title">✏ Update Email</div>
+        <form method="POST">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="update_email">
+          <div class="fg"><label>Username (cannot change)</label><input class="form-input" type="text" value="{{ user.username }}" disabled></div>
+          <div class="fg"><label>Email Address</label><input class="form-input" type="email" name="email" value="{{ user.email }}" required></div>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔐 Change Password</div>
+        <form method="POST">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="change_password">
+          <div class="fg"><label>Current Password</label><input class="form-input" type="password" name="current_password" required placeholder="Current password"></div>
+          <div class="fg"><label>New Password (min 8 chars)</label><input class="form-input" type="password" name="new_password" required minlength="8" placeholder="New password"></div>
+          <div class="fg"><label>Confirm New Password</label><input class="form-input" type="password" name="confirm_password" required placeholder="Repeat new password"></div>
+          <button type="submit" class="btn btn-primary">Change Password</button>
+        </form>
+      </div>
+
+      <div class="card" style="border-color:#fca5a5">
+        <div class="card-title" style="color:var(--danger)">⚠ Sign Out</div>
+        <p style="font-size:13.5px;color:var(--muted);margin-bottom:1rem">End your current session securely.</p>
+        <a href="{{ url_for('logout') }}" class="btn btn-danger">Sign Out</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

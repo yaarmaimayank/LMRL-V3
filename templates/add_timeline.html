@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Add Timeline Event — {{ patient.name }}{% endblock %}
+{% block content %}
+<div class="container" style="max-width:720px">
+  <div class="page-header fu">
+    <div>
+      <div class="page-title">Add Timeline Event</div>
+      <div class="page-sub">For: <strong>{{ patient.name }}</strong></div>
+    </div>
+    <a href="{{ url_for('patient_detail', pid=patient.id) }}" class="btn btn-outline">← Back</a>
+  </div>
+  <div class="card fu fu2">
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Event Date <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="date" name="event_date" required id="ed">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Event Type</label>
+          <select class="form-select" name="event_type">
+            <option value="record">Medical Visit</option>
+            <option value="birth">Birth / Registration</option>
+            <option value="surgery">Surgery</option>
+            <option value="vaccination">Vaccination</option>
+            <option value="allergy">Allergy Discovery</option>
+            <option value="chronic">Chronic Condition</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label class="form-label">Title <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="text" name="title" required placeholder="e.g. First Vaccination, COVID-19 Positive, Appendix Surgery">
+        </div>
+        <div class="form-group full">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" name="description" placeholder="Additional details about this event…"></textarea>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">✓ Save Event</button>
+        <a href="{{ url_for('patient_detail', pid=patient.id) }}" class="btn btn-outline">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script>document.getElementById('ed').valueAsDate=new Date();</script>{% endblock %}

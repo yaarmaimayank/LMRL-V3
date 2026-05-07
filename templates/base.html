@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>{% block title %}LMRL — Lifelong Medical Records{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f6ef7'/><text x='16' y='22' text-anchor='middle' font-size='18'>⚕</text></svg>">
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="{{ url_for('index') }}" class="nav-brand">
+      <div class="nav-logo">⚕</div>
+      <div class="nav-brand-text">LM<span>RL</span></div>
+    </a>
+
+    <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint=='index' %}active{% endif %}">Dashboard</a>
+
+    {% if current_user %}
+      {% if can_write %}
+        <a href="{{ url_for('add_patient') }}" class="nav-link">+ Patient</a>
+        <a href="{{ url_for('doctor_panel') }}" class="nav-link {% if request.endpoint=='doctor_panel' %}active{% endif %}">My Panel</a>
+      {% endif %}
+      {% if is_admin %}
+        <a href="{{ url_for('admin_panel') }}" class="nav-link admin-link {% if request.endpoint=='admin_panel' %}active{% endif %}">Admin</a>
+      {% endif %}
+    {% endif %}
+
+    <form class="nav-search" action="{{ url_for('search') }}" method="get">
+      <span class="s-icon">🔍</span>
+      <input type="text" name="q" placeholder="Search patients, records…" value="{{ request.args.get('q','') }}">
+      <button type="submit">Search</button>
+    </form>
+
+    {% if current_user %}
+    <div class="nav-user">
+      <div class="nav-user-btn" id="userBtn" onclick="toggleDD()">
+        <div class="nav-avatar">{{ current_user.username[0].upper() }}</div>
+        <span class="nav-uname">{{ current_user.username }}</span>
+        <span class="nav-caret">▾</span>
+      </div>
+      <div class="user-dropdown" id="userDD">
+        <div class="dd-header">
+          <div class="dd-name">{{ current_user.username }}</div>
+          <div class="dd-email">{{ current_user.email }}</div>
+          <div style="margin-top:6px">
+            <span class="badge {% if current_user.role=='admin' %}badge-purple{% elif current_user.role=='viewer' %}badge-grey{% else %}badge-blue{% endif %}">
+              {{ current_user.role|title }}
+            </span>
+          </div>
+        </div>
+        <a href="{{ url_for('profile') }}" class="dd-item">👤 My Profile</a>
+        {% if can_write %}<a href="{{ url_for('doctor_panel') }}" class="dd-item">🩺 My Panel</a>{% endif %}
+        {% if is_admin %}<a href="{{ url_for('admin_panel') }}" class="dd-item">🛡 Admin Panel</a>{% endif %}
+        <div class="dd-divider"></div>
+        <a href="{{ url_for('logout') }}" class="dd-item dd-danger">🚪 Sign Out</a>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</nav>
+
+<!-- FLASH -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-wrap" id="flashWrap">
+  {% for cat, msg in messages %}
+  <div class="flash flash-{{ cat }}">
+    {{ '✓' if cat == 'success' else '!' }} {{ msg }}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+{% block content %}{% endblock %}
+
+<script>
+function toggleDD(){document.getElementById('userDD').classList.toggle('open');}
+document.addEventListener('click',e=>{const b=document.getElementById('userBtn'),d=document.getElementById('userDD');if(b&&d&&!b.contains(e.target))d.classList.remove('open');});
+setTimeout(()=>{const fw=document.getElementById('flashWrap');if(fw){fw.style.transition='opacity .4s';fw.style.opacity='0';setTimeout(()=>fw.remove(),400);}},4200);
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

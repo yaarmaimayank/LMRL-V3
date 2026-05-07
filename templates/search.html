@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Search — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header fu">
+    <div>
+      <div class="page-title">Search Results</div>
+      {% if q %}<div class="page-sub">Results for "{{ q }}"</div>{% endif %}
+    </div>
+  </div>
+
+  {% if not q %}
+  <div class="card fu"><div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">Enter a name, UID, or diagnosis in the search bar above.</div></div></div>
+  {% else %}
+
+  <!-- Patients -->
+  <div style="margin-bottom:1.75rem" class="fu fu2">
+    <div class="section-label">👤 Patients ({{ patients|length }})</div>
+    {% if patients %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>DOB</th><th>Blood</th><th>Phone</th><th></th></tr></thead>
+        <tbody>
+          {% for p in patients %}
+          <tr>
+            <td><a href="{{ url_for('patient_detail', pid=p.id) }}">{{ p.name }}</a></td>
+            <td class="muted">{{ p.dob }}</td>
+            <td>{% if p.blood_group %}<span class="badge badge-red">{{ p.blood_group }}</span>{% else %}—{% endif %}</td>
+            <td class="muted">{{ p.phone or '—' }}</td>
+            <td><a href="{{ url_for('patient_detail', pid=p.id) }}" class="btn btn-outline btn-sm">View</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty" style="padding:1.5rem"><div class="empty-text">No patients found.</div></div></div>
+    {% endif %}
+  </div>
+
+  <!-- Records -->
+  <div class="fu fu3">
+    <div class="section-label">📋 Records ({{ records|length }})</div>
+    {% if records %}
+      {% for r in records %}
+      {% set parts = r.visit_date.split('-') if r.visit_date and '-' in r.visit_date else ['','',''] %}
+      {% set months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+      <div class="rec-card">
+        <div class="rec-date">
+          <div class="rec-day">{{ parts[2] }}</div>
+          <div class="rec-mon">{{ months[parts[1]|int] if parts[1] else '' }}</div>
+        </div>
+        <div class="rec-body">
+          <div class="rec-diag">{{ r.diagnosis or 'General Visit' }}</div>
+          <div class="rec-prov">Patient: <a href="{{ url_for('patient_detail', pid=r.patient_id) }}">{{ r.pname }}</a> &nbsp;·&nbsp; 🏥 {{ r.provider or 'N/A' }}</div>
+          {% if r.notes %}<div class="rec-notes">{{ r.notes }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="card"><div class="empty" style="padding:1.5rem"><div class="empty-text">No records found.</div></div></div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

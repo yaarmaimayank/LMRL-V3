@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}{{ patient.name }} — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+
+  <!-- Breadcrumb -->
+  <div style="margin-bottom:1rem;font-size:13px;color:var(--muted)">
+    <a href="{{ url_for('index') }}" style="color:var(--primary);text-decoration:none">Dashboard</a>
+    <span style="margin:0 6px">›</span> {{ patient.name }}
+  </div>
+
+  <!-- Patient header -->
+  <div class="patient-header fu">
+    <div class="patient-avatar">
+      {{ '👩' if patient.gender == 'Female' else '👨' }}
+    </div>
+    <div style="flex:1">
+      <div class="patient-name">{{ patient.name }}</div>
+      <div class="patient-uid">UID: {{ patient.id }}</div>
+      <div class="patient-chips">
+        {% if patient.dob %}<span class="chip">🎂 {{ patient.dob }}</span>{% endif %}
+        {% if patient.blood_group %}<span class="chip" style="color:var(--danger)">🩸 {{ patient.blood_group }}</span>{% endif %}
+        {% if patient.gender %}<span class="chip">⚧ {{ patient.gender }}</span>{% endif %}
+        {% if patient.phone %}<span class="chip">📞 {{ patient.phone }}</span>{% endif %}
+        {% if patient.email %}<span class="chip">✉ {{ patient.email }}</span>{% endif %}
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-start">
+      {% if can_write %}
+      <a href="{{ url_for('edit_patient', pid=patient.id) }}" class="btn btn-outline btn-sm">✏ Edit</a>
+      <a href="{{ url_for('add_record', pid=patient.id) }}" class="btn btn-primary btn-sm">+ Record</a>
+      <a href="{{ url_for('add_prescription', pid=patient.id) }}" class="btn btn-outline btn-sm">+ Rx</a>
+      <a href="{{ url_for('add_timeline', pid=patient.id) }}" class="btn btn-outline btn-sm">+ Event</a>
+      {% else %}
+      <span class="badge badge-grey">👁 View Only</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not can_write %}
+  <div class="viewer-notice">⚠ You have view-only access. To add or edit data, contact an Admin to upgrade your role.</div>
+  {% endif %}
+
+  <!-- Tabs -->
+  <div class="tabs fu fu2">
+    <button class="tab-btn active" onclick="st('records',this)">📋 Records ({{ records|length }})</button>
+    <button class="tab-btn" onclick="st('rx',this)">💊 Prescriptions ({{ prescriptions|length }})</button>
+    <button class="tab-btn" onclick="st('timeline',this)">📅 Timeline ({{ timeline|length }})</button>
+    <button class="tab-btn" onclick="st('info',this)">ℹ Info</button>
+  </div>
+
+  <!-- Records -->
+  <div id="tab-records" class="tab-panel active">
+    {% if records %}
+      {% for r in records %}
+      {% set parts = r.visit_date.split('-') if r.visit_date and '-' in r.visit_date else ['','',''] %}
+      {% set months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+      <div class="rec-card">
+        <div class="rec-date">
+          <div class="rec-day">{{ parts[2] }}</div>
+          <div class="rec-mon">{{ months[parts[1]|int] if parts[1] else '' }}</div>
+        </div>
+        <div class="rec-body">
+          <div class="rec-diag">{{ r.diagnosis or 'General Visit' }}</div>
+          <div class="rec-prov">🏥 {{ r.provider or 'Provider not specified' }}</div>
+          {% if r.notes %}<div class="rec-notes">{{ r.notes }}</div>{% endif %}
+          {% if r.file_path %}
+          <div style="margin-top:6px"><a href="{{ url_for('uploaded_file', filename=r.file_path) }}" target="_blank" class="btn btn-outline btn-sm">📎 View File</a></div>
+          {% endif %}
+        </div>
+        <div><span class="badge badge-blue">{{ r.visit_date }}</span></div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="card"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No records yet.{% if can_write %} <a href="{{ url_for('add_record', pid=patient.id) }}" style="color:var(--primary)">Add one →</a>{% endif %}</div></div></div>
+    {% endif %}
+  </div>
+
+  <!-- Prescriptions -->
+  <div id="tab-rx" class="tab-panel">
+    {% if prescriptions %}
+      {% for rx in prescriptions %}
+      <div class="rx-card">
+        <div class="rx-drug">💊 {{ rx.drug_name }}</div>
+        <div class="rx-details">
+          {% if rx.dosage %}<span class="rx-detail">📏 {{ rx.dosage }}</span>{% endif %}
+          {% if rx.frequency %}<span class="rx-detail">🔁 {{ rx.frequency }}</span>{% endif %}
+          {% if rx.duration %}<span class="rx-detail">⏱ {{ rx.duration }}</span>{% endif %}
+          {% if rx.prescribed_on %}<span class="rx-detail">📅 {{ rx.prescribed_on }}</span>{% endif %}
+        </div>
+        {% if rx.notes %}<div style="font-size:13px;color:var(--muted);margin-top:6px">{{ rx.notes }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="card"><div class="empty"><div class="empty-icon">💊</div><div class="empty-text">No prescriptions.{% if can_write %} <a href="{{ url_for('add_prescription', pid=patient.id) }}" style="color:var(--primary)">Add one →</a>{% endif %}</div></div></div>
+    {% endif %}
+  </div>
+
+  <!-- Timeline -->
+  <div id="tab-timeline" class="tab-panel">
+    {% if timeline %}
+    <div class="card">
+      <div class="timeline">
+        {% for ev in timeline %}
+        <div class="tl-item">
+          <div class="tl-dot {{ ev.event_type or '' }}"></div>
+          <div class="tl-date">{{ ev.event_date }}</div>
+          <div class="tl-title">{{ ev.title }}</div>
+          {% if ev.description %}<div class="tl-desc">{{ ev.description }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="empty"><div class="empty-icon">📅</div><div class="empty-text">No timeline events.{% if can_write %} <a href="{{ url_for('add_timeline', pid=patient.id) }}" style="color:var(--primary)">Add one →</a>{% endif %}</div></div></div>
+    {% endif %}
+  </div>
+
+  <!-- Info -->
+  <div id="tab-info" class="tab-panel">
+    <div class="card">
+      <div class="card-title">Patient Information</div>
+      <div class="info-grid">
+        {% for lbl, val in [('Full Name',patient.name),('Date of Birth',patient.dob),('Gender',patient.gender),('Blood Group',patient.blood_group),('Phone',patient.phone),('Email',patient.email),('Address',patient.address),('Unique ID',patient.id),('Registered On',patient.created_at[:10] if patient.created_at else '')] %}
+        <div class="info-item">
+          <label>{{ lbl }}</label>
+          <div class="info-val" style="{% if not val %}color:var(--muted){% endif %}">{{ val or '—' }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function st(name,btn){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+{% endblock %}

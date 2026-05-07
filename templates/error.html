@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }} — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="error-page">
+    <div class="error-num">{{ code }}</div>
+    <div class="page-title" style="margin-top:.5rem">{{ 'Access Denied' if code==403 else 'Not Found' if code==404 else 'Error' }}</div>
+    <div class="error-msg">{{ msg }}</div>
+    <div style="margin-top:2rem;display:flex;gap:.75rem">
+      <a href="{{ url_for('index') }}" class="btn btn-primary">← Dashboard</a>
+      <a href="javascript:history.back()" class="btn btn-outline">Go Back</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
