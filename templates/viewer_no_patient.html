@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}No Patient Linked — LMRL{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="error-page">
+    <div style="font-size:4rem;margin-bottom:1rem">⚠️</div>
+    <div class="page-title">No Patient Linked</div>
+    <div class="error-msg" style="margin-top:.5rem">
+      Your viewer account is not linked to any patient record.<br>
+      Please contact an Admin to link your account to your patient profile.
+    </div>
+    <div style="margin-top:2rem;display:flex;gap:.75rem">
+      <a href="{{ url_for('profile') }}" class="btn btn-primary">My Profile</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline">Sign Out</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

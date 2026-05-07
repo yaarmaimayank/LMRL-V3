@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Verify Email — LMRL</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f6ef7'/><text x='16' y='22' text-anchor='middle' font-size='18'>⚕</text></svg>">
+  <style>
+    .otp-inputs { display: flex; gap: 10px; justify-content: center; margin: 1.5rem 0; }
+    .otp-input {
+      width: 52px; height: 58px; text-align: center;
+      font-size: 1.5rem; font-weight: 700; border-radius: 10px;
+      border: 2px solid var(--border); background: var(--bg);
+      color: var(--text); font-family: 'Inter', monospace;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .otp-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,110,247,.12); background: var(--white); }
+    .otp-input.filled { border-color: var(--primary); background: var(--primary-bg); }
+    .timer { text-align: center; font-size: 13px; color: var(--muted); margin-bottom: 1rem; }
+    .timer span { font-weight: 700; color: var(--primary); }
+    .timer.expired span { color: var(--danger); }
+    .email-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--primary-bg); border: 1px solid #c7d3fc; border-radius: 999px; padding: 4px 14px; font-size: 13px; color: var(--primary); font-weight: 500; }
+  </style>
+</head>
+<body class="auth-body">
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+<div class="flash-wrap" id="flashWrap">{% for c,m in messages %}<div class="flash flash-{{c}}">{{ '✓' if c=='success' else '!' }} {{m}}</div>{% endfor %}</div>
+{% endif %}{% endwith %}
+
+<div class="auth-wrap" style="max-width:460px">
+  <div class="auth-logo fu">
+    <div class="auth-logo-icon" style="font-size:28px">✉</div>
+    <h1>Verify Your Email</h1>
+    <p>Check your inbox for the 6-digit code</p>
+  </div>
+
+  <div class="auth-card fu fu2">
+    <!-- Who we sent to -->
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <p style="font-size:14px;color:var(--text2);margin-bottom:.6rem">We sent a verification code to</p>
+      <div class="email-chip">✉ {{ email }}</div>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:.6rem">Hi <strong>{{ username }}</strong>, enter the code below to activate your account.</p>
+    </div>
+
+    <!-- Timer -->
+    <div class="timer" id="timerDiv">Code expires in <span id="countdown">10:00</span></div>
+
+    <!-- OTP form -->
+    <form method="POST" id="otpForm">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="verify">
+      <!-- Hidden field that collects the full OTP -->
+      <input type="hidden" name="otp" id="otpHidden">
+
+      <div class="otp-inputs">
+        {% for i in range(6) %}
+        <input class="otp-input" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
+               id="otp{{ i }}" autocomplete="off" {% if i==0 %}autofocus{% endif %}>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-wide" id="submitBtn" disabled>
+        ✓ Verify & Activate Account
+      </button>
+    </form>
+
+    <div style="margin-top:1.25rem;text-align:center">
+      <form method="POST" style="display:inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="resend">
+        <button type="submit" class="btn btn-outline btn-sm" id="resendBtn">
+          🔄 Resend Code
+        </button>
+      </form>
+    </div>
+
+    <div style="margin-top:1.25rem;text-align:center;font-size:13px;color:var(--muted)">
+      Wrong account? <a href="{{ url_for('register') }}" style="color:var(--primary)">Register again</a>
+    </div>
+  </div>
+</div>
+
+<script>
+// OTP input behaviour — auto-focus next, collect value
+const inputs = document.querySelectorAll('.otp-input');
+const hidden = document.getElementById('otpHidden');
+const submit = document.getElementById('submitBtn');
+
+function updateHidden(){
+  const val = Array.from(inputs).map(i=>i.value).join('');
+  hidden.value = val;
+  submit.disabled = val.length < 6;
+  inputs.forEach(i=>i.classList.toggle('filled', i.value !== ''));
+}
+
+inputs.forEach((inp, idx) => {
+  inp.addEventListener('input', e => {
+    // Allow only digits
+    inp.value = inp.value.replace(/\D/g,'').slice(-1);
+    updateHidden();
+    if (inp.value && idx < 5) inputs[idx+1].focus();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !inp.value && idx > 0) inputs[idx-1].focus();
+  });
+  inp.addEventListener('paste', e => {
+    e.preventDefault();
+    const txt = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g,'');
+    txt.split('').slice(0,6).forEach((ch,i) => { if(inputs[i]) inputs[i].value = ch; });
+    updateHidden();
+    const next = Math.min(txt.length, 5);
+    inputs[next].focus();
+  });
+});
+
+// 10-minute countdown
+let secs = 600;
+const cd = document.getElementById('countdown');
+const td = document.getElementById('timerDiv');
+const iv = setInterval(()=>{
+  secs--;
+  if(secs <= 0){ clearInterval(iv); cd.textContent='Expired'; td.classList.add('expired'); return; }
+  const m=Math.floor(secs/60), s=secs%60;
+  cd.textContent = m+':'+(s<10?'0':'')+s;
+}, 1000);
+
+// Flash dismiss
+setTimeout(()=>{const fw=document.getElementById('flashWrap');if(fw){fw.style.transition='opacity .4s';fw.style.opacity='0';setTimeout(()=>fw.remove(),400);}},4200);
+</script>
+</body>
+</html>

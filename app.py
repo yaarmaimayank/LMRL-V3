@@ -1,17 +1,28 @@
 """
 LMRL — Lifelong Medical Records Ledger
+
 Roles:
   admin   — full access + admin panel + user management
   doctor  — add/edit patients, records, prescriptions, timelines
   nurse   — same as doctor
-  viewer  — read-only access to all data (cannot add or edit anything)
+  viewer  — sees ONLY their linked patient's data (read-only)
+
+New in this version:
+  • First registered user automatically becomes admin
+  • Viewers must enter their Patient UID during registration
+    and can ONLY view that one patient's records
+  • Email OTP verification required on every new signup
+    (Falls back to on-screen OTP if email is not configured)
+
 Security:
-  PBKDF2-SHA256 (260k iterations) · CSRF tokens · Login rate-limiting · Audit log
+  PBKDF2-SHA256 (260k iterations) · CSRF · Rate-limiting · Audit log
 """
 
 from flask import (Flask, render_template, request, redirect, url_for,
-                   flash, send_from_directory, session, abort)
-import sqlite3, uuid, os, hashlib, hmac, secrets, time
+                   flash, send_from_directory, session, abort, g)
+import sqlite3, uuid, os, hashlib, hmac, secrets, time, random, smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from functools import wraps
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -33,11 +44,18 @@ app.config['UPLOAD_FOLDER']      = UPLOAD_DIR
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 DB_PATH = os.path.join(BASE_DIR, 'lmrl.db')
 
+# Email config — set these as environment variables
+EMAIL_HOST     = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT     = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USER     = os.environ.get('EMAIL_USER', '')       # your Gmail
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', '')   # Gmail App Password
+EMAIL_FROM     = os.environ.get('EMAIL_FROM', EMAIL_USER)
+
 _login_attempts: dict = {}
 MAX_ATTEMPTS  = 5
 LOCKOUT_SECS  = 15 * 60
+OTP_EXPIRY    = 10 * 60   # 10 minutes
 
-# Roles that can WRITE data
 WRITE_ROLES = ('admin', 'doctor', 'nurse')
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
@@ -58,8 +76,13 @@ def init_db():
             salt          TEXT    NOT NULL,
             role          TEXT    NOT NULL DEFAULT 'viewer',
             is_active     INTEGER NOT NULL DEFAULT 1,
+            is_verified   INTEGER NOT NULL DEFAULT 0,
+            patient_id    TEXT,
+            otp_code      TEXT,
+            otp_expires   REAL,
             created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
-            last_login    TEXT
+            last_login    TEXT,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
         );
         CREATE TABLE IF NOT EXISTS patients (
             id          TEXT PRIMARY KEY,
@@ -118,6 +141,53 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+
+# ── EMAIL OTP ─────────────────────────────────────────────────────────────────
+def generate_otp():
+    return str(random.randint(100000, 999999))
+
+def send_otp_email(to_email: str, username: str, otp: str) -> bool:
+    """Send OTP email. Returns True on success, False on failure."""
+    if not EMAIL_USER or not EMAIL_PASSWORD:
+        return False  # email not configured → fallback to screen display
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f'Your LMRL Verification Code: {otp}'
+        msg['From']    = f'LMRL System <{EMAIL_FROM}>'
+        msg['To']      = to_email
+
+        html = f"""
+        <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#f5f6fa;border-radius:12px">
+          <div style="background:#4f6ef7;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:20px">
+            <div style="font-size:32px">⚕</div>
+            <div style="color:#fff;font-size:18px;font-weight:700;margin-top:6px">LMRL Verification</div>
+          </div>
+          <div style="background:#fff;border-radius:10px;padding:24px;border:1px solid #e2e5f0">
+            <p style="color:#1a1d2e;font-size:15px;margin-bottom:16px">Hi <strong>{username}</strong>,</p>
+            <p style="color:#4a5068;font-size:14px;margin-bottom:20px">Your one-time verification code for LMRL signup is:</p>
+            <div style="background:#eef1fe;border:2px dashed #4f6ef7;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+              <div style="font-size:36px;font-weight:700;letter-spacing:10px;color:#4f6ef7;font-family:monospace">{otp}</div>
+            </div>
+            <p style="color:#8b91a7;font-size:13px">This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p>
+            <hr style="border:none;border-top:1px solid #e2e5f0;margin:16px 0">
+            <p style="color:#8b91a7;font-size:12px">If you did not request this, ignore this email. Your account will not be created.</p>
+          </div>
+        </div>
+        """
+        text = f"Hi {username},\n\nYour LMRL verification code is: {otp}\n\nIt expires in 10 minutes.\n\nDo not share this code."
+
+        msg.attach(MIMEText(text, 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=10) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(EMAIL_USER, EMAIL_PASSWORD)
+            smtp.sendmail(EMAIL_FROM, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[EMAIL ERROR] {e}")
+        return False
 
 # ── SECURITY HELPERS ──────────────────────────────────────────────────────────
 def hash_password(password, salt=None):
@@ -180,6 +250,12 @@ def get_current_user():
         return u
     return None
 
+def viewer_patient_id():
+    """Return the patient_id a viewer is restricted to, or None if not a viewer."""
+    if session.get('role') == 'viewer':
+        return session.get('viewer_pid')
+    return None
+
 # ── DECORATORS ────────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
@@ -191,7 +267,6 @@ def login_required(f):
     return d
 
 def write_required(f):
-    """Doctor, Nurse, Admin can write. Viewer gets 403."""
     @wraps(f)
     def d(*a, **kw):
         if 'user_id' not in session:
@@ -226,9 +301,9 @@ def inject_globals():
         'csrf_token':   gen_csrf(),
         'can_write':    u and u['role'] in WRITE_ROLES,
         'is_admin':     u and u['role'] == 'admin',
+        'is_viewer':    u and u['role'] == 'viewer',
     }
 
-# ── ERROR HANDLERS ────────────────────────────────────────────────────────────
 @app.errorhandler(403)
 def forbidden(e):
     return render_template('error.html', code=403,
@@ -239,21 +314,28 @@ def not_found(e):
     return render_template('error.html', code=404,
         msg="The page you're looking for doesn't exist."), 404
 
-# ── AUTH ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  REGISTRATION & OTP
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if 'user_id' in session:
         return redirect(url_for('index'))
+
     if request.method == 'POST':
         check_csrf()
-        username = request.form.get('username', '').strip()
-        email    = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-        confirm  = request.form.get('confirm_password', '')
-        role     = request.form.get('role', 'viewer')
+        username   = request.form.get('username', '').strip()
+        email      = request.form.get('email', '').strip().lower()
+        password   = request.form.get('password', '')
+        confirm    = request.form.get('confirm_password', '')
+        role       = request.form.get('role', 'viewer')
+        patient_id = request.form.get('patient_id', '').strip()
+
+        # Only allow safe roles via registration form
         if role not in ('doctor', 'nurse', 'viewer'):
             role = 'viewer'
 
+        # Validation
         errs = []
         if not all([username, email, password]):
             errs.append('All fields are required.')
@@ -263,31 +345,149 @@ def register():
             errs.append('Password must be at least 8 characters.')
         if password != confirm:
             errs.append('Passwords do not match.')
+        if role == 'viewer' and not patient_id:
+            errs.append('Viewers must provide their Patient UID.')
         if errs:
             for e in errs: flash(e, 'error')
             return render_template('register.html')
 
         conn = get_db()
+
+        # Verify patient exists for viewer
+        if role == 'viewer':
+            pat = conn.execute('SELECT id FROM patients WHERE id=?', (patient_id,)).fetchone()
+            if not pat:
+                conn.close()
+                flash('Patient UID not found. Please ask your doctor for the correct UID.', 'error')
+                return render_template('register.html')
+
+        # Check duplicate username/email
         if conn.execute('SELECT id FROM users WHERE username=? OR email=?',
                         (username, email)).fetchone():
             conn.close()
             flash('Username or email already taken.', 'error')
             return render_template('register.html')
+
+        # First-ever user → auto-promote to admin
+        user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        if user_count == 0:
+            role = 'admin'
+            patient_id = None
+
+        # Generate OTP
+        otp      = generate_otp()
+        otp_exp  = time.time() + OTP_EXPIRY
         pwd_hash, salt = hash_password(password)
-        conn.execute('INSERT INTO users (username,email,password_hash,salt,role) VALUES (?,?,?,?,?)',
-                     (username, email, pwd_hash, salt, role))
+
+        # Create unverified user
+        conn.execute(
+            '''INSERT INTO users
+               (username,email,password_hash,salt,role,is_verified,patient_id,otp_code,otp_expires)
+               VALUES (?,?,?,?,?,0,?,?,?)''',
+            (username, email, pwd_hash, salt, role,
+             patient_id if role == 'viewer' else None,
+             otp, otp_exp))
         conn.commit()
+        uid = conn.execute('SELECT id FROM users WHERE username=?', (username,)).fetchone()['id']
         conn.close()
-        audit('REGISTER', username)
-        flash(f'Account created! Welcome, {username}. Please log in.', 'success')
-        return redirect(url_for('login'))
+
+        # Try to send OTP email
+        email_sent = send_otp_email(email, username, otp)
+
+        # Store pending verification in session
+        session['pending_verify_uid'] = uid
+        session['pending_verify_user'] = username
+
+        if email_sent:
+            flash(f'A 6-digit OTP has been sent to {email}. It expires in 10 minutes.', 'success')
+            return redirect(url_for('verify_otp'))
+        else:
+            # Email not configured → show OTP on screen (dev mode)
+            flash(f'Email not configured. Your OTP is: {otp} (shown for development only)', 'error')
+            return redirect(url_for('verify_otp'))
+
     return render_template('register.html')
 
 
+@app.route('/verify-otp', methods=['GET', 'POST'])
+def verify_otp():
+    uid = session.get('pending_verify_uid')
+    if not uid:
+        flash('No pending verification. Please register first.', 'error')
+        return redirect(url_for('register'))
+
+    conn = get_db()
+    user = conn.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+    if not user:
+        conn.close()
+        flash('User not found. Please register again.', 'error')
+        return redirect(url_for('register'))
+
+    if request.method == 'POST':
+        check_csrf()
+        action = request.form.get('action', 'verify')
+
+        if action == 'resend':
+            # Resend OTP
+            new_otp = generate_otp()
+            new_exp = time.time() + OTP_EXPIRY
+            conn.execute('UPDATE users SET otp_code=?,otp_expires=? WHERE id=?',
+                         (new_otp, new_exp, uid))
+            conn.commit()
+            conn.close()
+            sent = send_otp_email(user['email'], user['username'], new_otp)
+            if sent:
+                flash('A new OTP has been sent to your email.', 'success')
+            else:
+                flash(f'Email not configured. New OTP: {new_otp}', 'error')
+            return redirect(url_for('verify_otp'))
+
+        entered = request.form.get('otp', '').strip()
+        now     = time.time()
+
+        if not entered:
+            conn.close()
+            flash('Please enter the OTP.', 'error')
+            return render_template('verify_otp.html', username=user['username'], email=user['email'])
+
+        if user['otp_expires'] and now > user['otp_expires']:
+            conn.close()
+            flash('OTP has expired. Please request a new one.', 'error')
+            return render_template('verify_otp.html', username=user['username'], email=user['email'])
+
+        if not hmac.compare_digest(entered, str(user['otp_code'])):
+            conn.close()
+            flash('Incorrect OTP. Please try again.', 'error')
+            return render_template('verify_otp.html', username=user['username'], email=user['email'])
+
+        # ✅ OTP verified — activate account
+        conn.execute('UPDATE users SET is_verified=1,otp_code=NULL,otp_expires=NULL WHERE id=?', (uid,))
+        conn.commit()
+        conn.close()
+
+        audit('EMAIL_VERIFIED', user['username'])
+        session.pop('pending_verify_uid', None)
+        session.pop('pending_verify_user', None)
+
+        role_label = user['role']
+        if user['role'] == 'admin':
+            flash(f'Email verified! Welcome, {user["username"]}. You are the first user and have been given Admin access. Please log in.', 'success')
+        else:
+            flash(f'Email verified! Account created as {role_label.title()}. Please log in.', 'success')
+        return redirect(url_for('login'))
+
+    conn.close()
+    return render_template('verify_otp.html', username=user['username'], email=user['email'])
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LOGIN / LOGOUT
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
         return redirect(url_for('index'))
+
     if request.method == 'POST':
         check_csrf()
         ip = client_ip()
@@ -304,12 +504,29 @@ def login():
             (username, username)).fetchone()
         conn.close()
 
-        if user and verify_password(password, user['password_hash'], user['salt']):
+        if not user:
+            record_attempt(ip)
+            left = max(0, MAX_ATTEMPTS - len(_login_attempts.get(ip, [])))
+            audit('LOGIN_FAIL', username)
+            flash(f'Invalid credentials. {left} attempts remaining.', 'error')
+            return render_template('login.html')
+
+        if not user['is_verified']:
+            # Account exists but not verified → redirect to OTP
+            session['pending_verify_uid']  = user['id']
+            session['pending_verify_user'] = user['username']
+            flash('Your account is not verified yet. Please complete OTP verification.', 'error')
+            return redirect(url_for('verify_otp'))
+
+        if verify_password(password, user['password_hash'], user['salt']):
             clear_attempts(ip)
             session.permanent = False
             session['user_id']  = user['id']
             session['username'] = user['username']
             session['role']     = user['role']
+            if user['role'] == 'viewer' and user['patient_id']:
+                session['viewer_pid'] = user['patient_id']
+
             conn = get_db()
             conn.execute('UPDATE users SET last_login=? WHERE id=?',
                          (datetime.utcnow().isoformat(), user['id']))
@@ -317,12 +534,17 @@ def login():
             conn.close()
             audit('LOGIN', username)
             flash(f'Welcome back, {user["username"]}!', 'success')
+
+            # Redirect viewer straight to their patient
+            if user['role'] == 'viewer' and user['patient_id']:
+                return redirect(url_for('patient_detail', pid=user['patient_id']))
             return redirect(url_for('index'))
         else:
             record_attempt(ip)
             left = max(0, MAX_ATTEMPTS - len(_login_attempts.get(ip, [])))
             audit('LOGIN_FAIL', username)
-            flash(f'Invalid credentials. {left} attempts left.', 'error')
+            flash(f'Invalid credentials. {left} attempts remaining.', 'error')
+
     return render_template('login.html')
 
 
@@ -334,6 +556,9 @@ def logout():
     return redirect(url_for('login'))
 
 
+# ═══════════════════════════════════════════════════════════════════════
+#  PROFILE
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
@@ -360,20 +585,28 @@ def profile():
                 flash('Passwords do not match.', 'error')
             else:
                 h, s = hash_password(new)
-                conn.execute('UPDATE users SET password_hash=?,salt=? WHERE id=?',
-                             (h, s, user['id']))
+                conn.execute('UPDATE users SET password_hash=?,salt=? WHERE id=?', (h, s, user['id']))
                 conn.commit()
                 audit('CHANGE_PASSWORD')
                 flash('Password changed successfully.', 'success')
         conn.close()
         return redirect(url_for('profile'))
+
     conn = get_db()
     mp = conn.execute('SELECT COUNT(*) FROM patients WHERE created_by=?', (user['id'],)).fetchone()[0]
     mr = conn.execute('SELECT COUNT(*) FROM records  WHERE created_by=?', (user['id'],)).fetchone()[0]
+    linked_patient = None
+    if user['role'] == 'viewer' and user['patient_id']:
+        linked_patient = conn.execute('SELECT * FROM patients WHERE id=?',
+                                      (user['patient_id'],)).fetchone()
     conn.close()
-    return render_template('profile.html', user=user, my_patients=mp, my_records=mr)
+    return render_template('profile.html', user=user,
+                           my_patients=mp, my_records=mr, linked_patient=linked_patient)
 
-# ── ADMIN ─────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ADMIN PANEL
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/admin')
 @admin_required
 def admin_panel():
@@ -443,7 +676,10 @@ def admin_delete(uid):
     conn.close()
     return redirect(url_for('admin_panel'))
 
-# ── DOCTOR PANEL ──────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  DOCTOR PANEL
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/doctor')
 @write_required
 def doctor_panel():
@@ -470,14 +706,24 @@ def doctor_panel():
         'rx':       conn.execute('SELECT COUNT(*) FROM prescriptions WHERE created_by=?', (uid,)).fetchone()[0],
     }
     conn.close()
-    audit('DOCTOR_VIEW')
     return render_template('doctor_panel.html', my_patients=my_patients,
                            recent_records=recent_records, recent_rx=recent_rx, stats=stats)
 
-# ── DASHBOARD ─────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/')
 @login_required
 def index():
+    # Viewers → redirect to their patient page immediately
+    if session.get('role') == 'viewer':
+        pid = session.get('viewer_pid')
+        if pid:
+            return redirect(url_for('patient_detail', pid=pid))
+        flash('Your account is not linked to any patient. Contact an Admin.', 'error')
+        return render_template('viewer_no_patient.html')
+
     conn = get_db()
     patients = conn.execute('SELECT * FROM patients ORDER BY created_at DESC').fetchall()
     stats = {
@@ -489,10 +735,18 @@ def index():
     conn.close()
     return render_template('index.html', patients=patients, stats=stats)
 
-# ── SEARCH ────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SEARCH (blocked for viewers)
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/search')
 @login_required
 def search():
+    if session.get('role') == 'viewer':
+        flash('Search is disabled for viewer accounts.', 'error')
+        pid = session.get('viewer_pid')
+        return redirect(url_for('patient_detail', pid=pid) if pid else url_for('index'))
+
     q = request.args.get('q', '').strip()
     pts, recs = [], []
     if q:
@@ -501,13 +755,17 @@ def search():
             "SELECT * FROM patients WHERE name LIKE ? OR id LIKE ? OR phone LIKE ?",
             (f'%{q}%', f'%{q}%', f'%{q}%')).fetchall()
         recs = conn.execute(
-            """SELECT r.*, p.name as pname FROM records r JOIN patients p ON r.patient_id=p.id
+            """SELECT r.*, p.name as pname FROM records r
+               JOIN patients p ON r.patient_id=p.id
                WHERE r.diagnosis LIKE ? OR r.provider LIKE ? OR r.notes LIKE ?""",
             (f'%{q}%', f'%{q}%', f'%{q}%')).fetchall()
         conn.close()
     return render_template('search.html', q=q, patients=pts, records=recs)
 
-# ── PATIENTS ──────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  PATIENTS
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/patient/add', methods=['GET', 'POST'])
 @write_required
 def add_patient():
@@ -528,7 +786,7 @@ def add_patient():
         conn.commit()
         conn.close()
         audit('ADD_PATIENT', name)
-        flash(f'Patient "{name}" added successfully.', 'success')
+        flash(f'Patient "{name}" added. UID: {pid}', 'success')
         return redirect(url_for('patient_detail', pid=pid))
     return render_template('add_patient.html', patient=None, edit=False)
 
@@ -536,14 +794,21 @@ def add_patient():
 @app.route('/patient/<pid>')
 @login_required
 def patient_detail(pid):
+    # Viewer access control — only their own patient
+    if session.get('role') == 'viewer':
+        allowed = session.get('viewer_pid')
+        if pid != allowed:
+            audit('VIEWER_BLOCKED', pid)
+            abort(403)
+
     conn = get_db()
     patient = conn.execute('SELECT * FROM patients WHERE id=?', (pid,)).fetchone()
     if not patient:
         flash('Patient not found.', 'error')
         return redirect(url_for('index'))
-    records = conn.execute('SELECT * FROM records WHERE patient_id=? ORDER BY visit_date DESC', (pid,)).fetchall()
-    rxs     = conn.execute('SELECT * FROM prescriptions WHERE patient_id=? ORDER BY prescribed_on DESC', (pid,)).fetchall()
-    timeline= conn.execute('SELECT * FROM timelines WHERE patient_id=? ORDER BY event_date ASC', (pid,)).fetchall()
+    records  = conn.execute('SELECT * FROM records WHERE patient_id=? ORDER BY visit_date DESC', (pid,)).fetchall()
+    rxs      = conn.execute('SELECT * FROM prescriptions WHERE patient_id=? ORDER BY prescribed_on DESC', (pid,)).fetchall()
+    timeline = conn.execute('SELECT * FROM timelines WHERE patient_id=? ORDER BY event_date ASC', (pid,)).fetchall()
     conn.close()
     audit('VIEW_PATIENT', pid)
     return render_template('patient_detail.html', patient=patient,
@@ -573,7 +838,10 @@ def edit_patient(pid):
     conn.close()
     return render_template('add_patient.html', patient=patient, edit=True)
 
-# ── RECORDS ───────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+#  RECORDS / PRESCRIPTIONS / TIMELINE
+# ═══════════════════════════════════════════════════════════════════════
 @app.route('/patient/<pid>/record/add', methods=['GET', 'POST'])
 @write_required
 def add_record(pid):
@@ -606,7 +874,7 @@ def add_record(pid):
     conn.close()
     return render_template('add_record.html', patient=patient)
 
-# ── PRESCRIPTIONS ─────────────────────────────────────────────────────────────
+
 @app.route('/patient/<pid>/prescription/add', methods=['GET', 'POST'])
 @write_required
 def add_prescription(pid):
@@ -630,7 +898,7 @@ def add_prescription(pid):
     conn.close()
     return render_template('add_prescription.html', patient=patient, records=records)
 
-# ── TIMELINE ──────────────────────────────────────────────────────────────────
+
 @app.route('/patient/<pid>/timeline/add', methods=['GET', 'POST'])
 @write_required
 def add_timeline(pid):
@@ -651,12 +919,14 @@ def add_timeline(pid):
     conn.close()
     return render_template('add_timeline.html', patient=patient)
 
+
 # ── UPLOADS ───────────────────────────────────────────────────────────────────
 @app.route('/uploads/<filename>')
 @login_required
 def uploaded_file(filename):
-    filename = os.path.basename(filename)  # prevent path traversal
+    filename = os.path.basename(filename)
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 init_db()
