@@ -20,9 +20,8 @@ Security:
 
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, send_from_directory, session, abort, g)
-import sqlite3, uuid, os, hashlib, hmac, secrets, time, random, smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import sqlite3, uuid, os, hashlib, hmac, secrets, time, random
+import urllib.request, urllib.error, json
 from functools import wraps
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -44,8 +43,8 @@ app.config['UPLOAD_FOLDER']      = UPLOAD_DIR
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 DB_PATH = os.path.join(BASE_DIR, 'lmrl.db')
 
-# Email config is read live inside send_otp_email() so env var
-# changes on Render take effect without a redeploy.
+# Email: uses Resend API (HTTPS) — works on Render free tier.
+# Set RESEND_API_KEY and EMAIL_FROM in Render environment variables.
 
 _login_attempts: dict = {}
 MAX_ATTEMPTS  = 5
@@ -143,67 +142,68 @@ def generate_otp():
     return str(random.randint(100000, 999999))
 
 def send_otp_email(to_email: str, username: str, otp: str) -> bool:
-    """Send OTP email. Returns True on success, False on failure."""
-    # Read env vars fresh every call — survives Render hot config changes
-    email_host = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-    email_port = int(os.environ.get('EMAIL_PORT', 587))
-    email_user = os.environ.get('EMAIL_USER', '').strip()
-    email_pass = os.environ.get('EMAIL_PASSWORD', '').strip()
-    email_from = os.environ.get('EMAIL_FROM', email_user).strip()
+    """
+    Send OTP via Resend API (HTTPS) — works on Render free tier.
+    Falls back gracefully if not configured.
+    """
+    api_key    = os.environ.get('RESEND_API_KEY', '').strip()
+    email_from = os.environ.get('EMAIL_FROM', 'onboarding@resend.dev').strip()
 
-    print(f"[EMAIL] user={repr(email_user)} configured={bool(email_user and email_pass)}", flush=True)
+    print(f"[EMAIL] to={to_email} api_key_set={bool(api_key)} from={email_from}", flush=True)
 
-    if not email_user or not email_pass:
-        print("[EMAIL] Not configured — falling back to on-screen OTP", flush=True)
+    if not api_key:
+        print("[EMAIL] RESEND_API_KEY not set — falling back to on-screen OTP", flush=True)
         return False
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f'Your LMRL Verification Code: {otp}'
-        msg['From']    = f'LMRL System <{email_from}>'
-        msg['To']      = to_email
 
-        html = f"""
-        <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#f5f6fa;border-radius:12px">
-          <div style="background:#4f6ef7;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:20px">
-            <div style="font-size:32px">⚕</div>
-            <div style="color:#fff;font-size:18px;font-weight:700;margin-top:6px">LMRL Verification</div>
-          </div>
-          <div style="background:#fff;border-radius:10px;padding:24px;border:1px solid #e2e5f0">
-            <p style="color:#1a1d2e;font-size:15px;margin-bottom:16px">Hi <strong>{username}</strong>,</p>
-            <p style="color:#4a5068;font-size:14px;margin-bottom:20px">Your one-time verification code for LMRL signup is:</p>
-            <div style="background:#eef1fe;border:2px dashed #4f6ef7;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
-              <div style="font-size:36px;font-weight:700;letter-spacing:10px;color:#4f6ef7;font-family:monospace">{otp}</div>
-            </div>
-            <p style="color:#8b91a7;font-size:13px">This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p>
-            <hr style="border:none;border-top:1px solid #e2e5f0;margin:16px 0">
-            <p style="color:#8b91a7;font-size:12px">If you did not request this, ignore this email. Your account will not be created.</p>
-          </div>
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#f5f6fa;border-radius:12px">
+      <div style="background:#4f6ef7;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:20px">
+        <div style="font-size:32px">&#9877;</div>
+        <div style="color:#fff;font-size:18px;font-weight:700;margin-top:6px">LMRL Verification</div>
+      </div>
+      <div style="background:#fff;border-radius:10px;padding:24px;border:1px solid #e2e5f0">
+        <p style="color:#1a1d2e;font-size:15px;margin-bottom:16px">Hi <strong>{username}</strong>,</p>
+        <p style="color:#4a5068;font-size:14px;margin-bottom:20px">Your one-time verification code is:</p>
+        <div style="background:#eef1fe;border:2px dashed #4f6ef7;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px">
+          <div style="font-size:36px;font-weight:700;letter-spacing:10px;color:#4f6ef7;font-family:monospace">{otp}</div>
         </div>
-        """
-        text = f"Hi {username},\n\nYour LMRL verification code is: {otp}\n\nIt expires in 10 minutes.\n\nDo not share this code."
+        <p style="color:#8b91a7;font-size:13px">Expires in <strong>10 minutes</strong>. Do not share it.</p>
+      </div>
+    </div>
+    """
 
-        msg.attach(MIMEText(text, 'plain'))
-        msg.attach(MIMEText(html, 'html'))
+    payload = json.dumps({
+        "from":    email_from,
+        "to":      [to_email],
+        "subject": f"Your LMRL Verification Code: {otp}",
+        "html":    html_body,
+        "text":    f"Hi {username},\n\nYour LMRL OTP is: {otp}\n\nExpires in 10 minutes.",
+    }).encode('utf-8')
 
-        with smtplib.SMTP(email_host, email_port, timeout=15) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.ehlo()
-            smtp.login(email_user, email_pass)
-            smtp.sendmail(email_from, to_email, msg.as_string())
-        print(f"[EMAIL] Sent OTP to {to_email} successfully", flush=True)
-        return True
-    except smtplib.SMTPAuthenticationError as e:
-        print(f"[EMAIL AUTH ERROR] Wrong credentials: {e}", flush=True)
-        return False
-    except smtplib.SMTPException as e:
-        print(f"[EMAIL SMTP ERROR] {e}", flush=True)
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data    = payload,
+        method  = "POST",
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode()
+            print(f"[EMAIL] Resend API response {resp.status}: {body}", flush=True)
+            return resp.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[EMAIL] Resend HTTP {e.code}: {body}", flush=True)
         return False
     except Exception as e:
-        print(f"[EMAIL ERROR] {type(e).__name__}: {e}", flush=True)
+        print(f"[EMAIL] Error: {type(e).__name__}: {e}", flush=True)
         return False
 
-# ── SECURITY HELPERS ──────────────────────────────────────────────────────────
+
 def hash_password(password, salt=None):
     if not salt:
         salt = secrets.token_hex(32)
