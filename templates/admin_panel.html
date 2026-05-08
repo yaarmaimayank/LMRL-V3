@@ -23,6 +23,27 @@
     <div class="stat-card"><div class="stat-icon green">💊</div><div><div class="stat-value">{{ stats.rx }}</div><div class="stat-label">Prescriptions</div></div></div>
   </div>
 
+  <!-- ═══ EMAIL TEST SECTION ══════════════════════════════════════════ -->
+  <div class="card fu" style="margin-bottom:1.5rem;border-color:rgba(13,148,136,.25);background:#f0fdfa">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem">
+      <div>
+        <div style="font-weight:600;font-size:14px;color:var(--text);display:flex;align-items:center;gap:7px">
+          📧 Email Configuration Test
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-top:3px">
+          Send a test OTP to your admin email to verify SMTP is working correctly.
+          Check Render logs if it fails.
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('admin_test_email') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn-success btn-sm">
+          📨 Send Test Email to {{ current_user.email }}
+        </button>
+      </form>
+    </div>
+  </div>
+
   <!-- ═══ ADD STAFF SECTION ═══════════════════════════════════════════ -->
   <div class="page-header fu fu2">
     <div>

@@ -44,12 +44,8 @@ app.config['UPLOAD_FOLDER']      = UPLOAD_DIR
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 DB_PATH = os.path.join(BASE_DIR, 'lmrl.db')
 
-# Email config — set these as environment variables
-EMAIL_HOST     = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT     = int(os.environ.get('EMAIL_PORT', 587))
-EMAIL_USER     = os.environ.get('EMAIL_USER', '')       # your Gmail
-EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', '')   # Gmail App Password
-EMAIL_FROM     = os.environ.get('EMAIL_FROM', EMAIL_USER)
+# Email config is read live inside send_otp_email() so env var
+# changes on Render take effect without a redeploy.
 
 _login_attempts: dict = {}
 MAX_ATTEMPTS  = 5
@@ -148,12 +144,22 @@ def generate_otp():
 
 def send_otp_email(to_email: str, username: str, otp: str) -> bool:
     """Send OTP email. Returns True on success, False on failure."""
-    if not EMAIL_USER or not EMAIL_PASSWORD:
-        return False  # email not configured → fallback to screen display
+    # Read env vars fresh every call — survives Render hot config changes
+    email_host = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+    email_port = int(os.environ.get('EMAIL_PORT', 587))
+    email_user = os.environ.get('EMAIL_USER', '').strip()
+    email_pass = os.environ.get('EMAIL_PASSWORD', '').strip()
+    email_from = os.environ.get('EMAIL_FROM', email_user).strip()
+
+    print(f"[EMAIL] user={repr(email_user)} configured={bool(email_user and email_pass)}", flush=True)
+
+    if not email_user or not email_pass:
+        print("[EMAIL] Not configured — falling back to on-screen OTP", flush=True)
+        return False
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f'Your LMRL Verification Code: {otp}'
-        msg['From']    = f'LMRL System <{EMAIL_FROM}>'
+        msg['From']    = f'LMRL System <{email_from}>'
         msg['To']      = to_email
 
         html = f"""
@@ -179,14 +185,22 @@ def send_otp_email(to_email: str, username: str, otp: str) -> bool:
         msg.attach(MIMEText(text, 'plain'))
         msg.attach(MIMEText(html, 'html'))
 
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=10) as smtp:
+        with smtplib.SMTP(email_host, email_port, timeout=15) as smtp:
             smtp.ehlo()
             smtp.starttls()
-            smtp.login(EMAIL_USER, EMAIL_PASSWORD)
-            smtp.sendmail(EMAIL_FROM, to_email, msg.as_string())
+            smtp.ehlo()
+            smtp.login(email_user, email_pass)
+            smtp.sendmail(email_from, to_email, msg.as_string())
+        print(f"[EMAIL] Sent OTP to {to_email} successfully", flush=True)
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[EMAIL AUTH ERROR] Wrong credentials: {e}", flush=True)
+        return False
+    except smtplib.SMTPException as e:
+        print(f"[EMAIL SMTP ERROR] {e}", flush=True)
+        return False
     except Exception as e:
-        print(f"[EMAIL ERROR] {e}")
+        print(f"[EMAIL ERROR] {type(e).__name__}: {e}", flush=True)
         return False
 
 # ── SECURITY HELPERS ──────────────────────────────────────────────────────────
@@ -628,6 +642,29 @@ def admin_panel():
     conn.close()
     audit('ADMIN_VIEW')
     return render_template('admin_panel.html', users=users, stats=stats, logs=logs)
+
+
+@app.route('/admin/test-email', methods=['POST'])
+@admin_required
+def admin_test_email():
+    """Send a test email so admin can verify SMTP settings work."""
+    check_csrf()
+    user = get_current_user()
+    test_otp = '123456'
+    sent = send_otp_email(user['email'], user['username'], test_otp)
+    if sent:
+        flash(f'✅ Test email sent to {user["email"]}! Check your inbox.', 'success')
+    else:
+        email_user = os.environ.get('EMAIL_USER', '').strip()
+        email_pass = os.environ.get('EMAIL_PASSWORD', '').strip()
+        if not email_user:
+            flash('❌ EMAIL_USER environment variable is empty or not set on Render.', 'error')
+        elif not email_pass:
+            flash('❌ EMAIL_PASSWORD environment variable is empty or not set on Render.', 'error')
+        else:
+            flash(f'❌ Email failed. EMAIL_USER={email_user} is set but sending failed — check Render logs for details.', 'error')
+    return redirect(url_for('admin_panel'))
+
 
 @app.route('/admin/user/<int:uid>/toggle', methods=['POST'])
 @admin_required
