@@ -330,9 +330,19 @@ def register():
         confirm    = request.form.get('confirm_password', '')
         patient_id = request.form.get('patient_id', '').strip()
 
-        # Public registration is VIEWER ONLY.
-        # Doctor/Nurse accounts are created by Admin only.
-        role = 'viewer'
+        conn = get_db()
+
+        # Check if this is the very first user BEFORE validation
+        # so we can skip the Patient UID requirement for the admin
+        user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        is_first_user = (user_count == 0)
+
+        # First user becomes admin automatically — no patient UID needed
+        if is_first_user:
+            role = 'admin'
+            patient_id = None
+        else:
+            role = 'viewer'
 
         # Validation
         errs = []
@@ -344,33 +354,27 @@ def register():
             errs.append('Password must be at least 8 characters.')
         if password != confirm:
             errs.append('Passwords do not match.')
-        if not patient_id:
+        if not is_first_user and not patient_id:
             errs.append('Please provide your Patient UID to link your account.')
         if errs:
-            for e in errs: flash(e, 'error')
-            return render_template('register.html')
-
-        conn = get_db()
-
-        # All public registrations are viewers — verify patient UID exists
-        pat = conn.execute('SELECT id FROM patients WHERE id=?', (patient_id,)).fetchone()
-        if not pat:
             conn.close()
-            flash('Patient UID not found. Please ask your doctor for the correct UID.', 'error')
-            return render_template('register.html')
+            for e in errs: flash(e, 'error')
+            return render_template('register.html', is_first_user=is_first_user)
+
+        # For viewers: verify the patient UID actually exists
+        if not is_first_user:
+            pat = conn.execute('SELECT id FROM patients WHERE id=?', (patient_id,)).fetchone()
+            if not pat:
+                conn.close()
+                flash('Patient UID not found. Please ask your doctor for the correct UID.', 'error')
+                return render_template('register.html', is_first_user=False)
 
         # Check duplicate username/email
         if conn.execute('SELECT id FROM users WHERE username=? OR email=?',
                         (username, email)).fetchone():
             conn.close()
             flash('Username or email already taken.', 'error')
-            return render_template('register.html')
-
-        # First-ever user → auto-promote to admin
-        user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
-        if user_count == 0:
-            role = 'admin'
-            patient_id = None
+            return render_template('register.html', is_first_user=is_first_user)
 
         # Generate OTP
         otp      = generate_otp()
@@ -404,7 +408,11 @@ def register():
             flash(f'Email not configured. Your OTP is: {otp} (shown for development only)', 'error')
             return redirect(url_for('verify_otp'))
 
-    return render_template('register.html')
+    # Pass is_first_user so template can hide/show Patient UID field
+    conn = get_db()
+    is_first_user = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 0
+    conn.close()
+    return render_template('register.html', is_first_user=is_first_user)
 
 
 @app.route('/verify-otp', methods=['GET', 'POST'])
