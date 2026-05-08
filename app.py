@@ -328,12 +328,11 @@ def register():
         email      = request.form.get('email', '').strip().lower()
         password   = request.form.get('password', '')
         confirm    = request.form.get('confirm_password', '')
-        role       = request.form.get('role', 'viewer')
         patient_id = request.form.get('patient_id', '').strip()
 
-        # Only allow safe roles via registration form
-        if role not in ('doctor', 'nurse', 'viewer'):
-            role = 'viewer'
+        # Public registration is VIEWER ONLY.
+        # Doctor/Nurse accounts are created by Admin only.
+        role = 'viewer'
 
         # Validation
         errs = []
@@ -345,21 +344,20 @@ def register():
             errs.append('Password must be at least 8 characters.')
         if password != confirm:
             errs.append('Passwords do not match.')
-        if role == 'viewer' and not patient_id:
-            errs.append('Viewers must provide their Patient UID.')
+        if not patient_id:
+            errs.append('Please provide your Patient UID to link your account.')
         if errs:
             for e in errs: flash(e, 'error')
             return render_template('register.html')
 
         conn = get_db()
 
-        # Verify patient exists for viewer
-        if role == 'viewer':
-            pat = conn.execute('SELECT id FROM patients WHERE id=?', (patient_id,)).fetchone()
-            if not pat:
-                conn.close()
-                flash('Patient UID not found. Please ask your doctor for the correct UID.', 'error')
-                return render_template('register.html')
+        # All public registrations are viewers — verify patient UID exists
+        pat = conn.execute('SELECT id FROM patients WHERE id=?', (patient_id,)).fetchone()
+        if not pat:
+            conn.close()
+            flash('Patient UID not found. Please ask your doctor for the correct UID.', 'error')
+            return render_template('register.html')
 
         # Check duplicate username/email
         if conn.execute('SELECT id FROM users WHERE username=? OR email=?',
@@ -674,6 +672,51 @@ def admin_delete(uid):
         audit('USER_DELETED', u['username'])
         flash(f'User "{u["username"]}" deleted.', 'success')
     conn.close()
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/add-staff', methods=['POST'])
+@admin_required
+def admin_add_staff():
+    """Admin creates a doctor or nurse account directly — no OTP, auto-verified."""
+    check_csrf()
+    username = request.form.get('username', '').strip()
+    email    = request.form.get('email', '').strip().lower()
+    password = request.form.get('password', '')
+    role     = request.form.get('role', 'doctor')
+
+    if role not in ('doctor', 'nurse'):
+        flash('Invalid role. Must be doctor or nurse.', 'error')
+        return redirect(url_for('admin_panel'))
+
+    errs = []
+    if not all([username, email, password]):
+        errs.append('All fields are required.')
+    if len(username) < 3:
+        errs.append('Username must be at least 3 characters.')
+    if len(password) < 8:
+        errs.append('Password must be at least 8 characters.')
+    if errs:
+        for e in errs: flash(e, 'error')
+        return redirect(url_for('admin_panel'))
+
+    conn = get_db()
+    if conn.execute('SELECT id FROM users WHERE username=? OR email=?',
+                    (username, email)).fetchone():
+        conn.close()
+        flash('Username or email already taken.', 'error')
+        return redirect(url_for('admin_panel'))
+
+    pwd_hash, salt = hash_password(password)
+    # is_verified=1 → admin-created accounts skip OTP
+    conn.execute(
+        '''INSERT INTO users (username,email,password_hash,salt,role,is_verified,is_active)
+           VALUES (?,?,?,?,?,1,1)''',
+        (username, email, pwd_hash, salt, role))
+    conn.commit()
+    conn.close()
+    audit('ADMIN_ADD_STAFF', f'{role}:{username}')
+    flash(f'{role.title()} account "{username}" created successfully. They can log in immediately.', 'success')
     return redirect(url_for('admin_panel'))
 
 

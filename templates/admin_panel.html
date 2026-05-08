@@ -3,11 +3,12 @@
 {% block content %}
 <div class="container">
 
+  <!-- Banner -->
   <div class="admin-banner fu">
     <div class="banner-icon">🛡</div>
     <div>
       <div class="banner-title">Admin Control Panel</div>
-      <div class="banner-sub">Manage users, roles, and monitor all system activity.</div>
+      <div class="banner-sub">Manage users, create staff accounts, and monitor system activity.</div>
     </div>
     <div class="banner-actions">
       <a href="{{ url_for('index') }}" class="btn btn-banner btn-sm">← Dashboard</a>
@@ -22,53 +23,144 @@
     <div class="stat-card"><div class="stat-icon green">💊</div><div><div class="stat-value">{{ stats.rx }}</div><div class="stat-label">Prescriptions</div></div></div>
   </div>
 
-  <!-- Users -->
+  <!-- ═══ ADD STAFF SECTION ═══════════════════════════════════════════ -->
+  <div class="page-header fu fu2">
+    <div>
+      <div class="page-title">Add Staff Account</div>
+      <div class="page-sub">Create Doctor or Nurse accounts directly — no OTP needed, they can log in immediately</div>
+    </div>
+  </div>
+
+  <div class="card fu fu2" style="margin-bottom:2rem;border-color:rgba(79,110,247,.25)">
+    <form method="POST" action="{{ url_for('admin_add_staff') }}" autocomplete="off">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:1rem;align-items:flex-end;flex-wrap:wrap">
+
+        <div class="form-group">
+          <label class="form-label">Username <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="text" name="username" placeholder="e.g. dr_sharma" required minlength="3">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Email <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" type="email" name="email" placeholder="doctor@hospital.com" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Temporary Password <span style="color:var(--danger)">*</span></label>
+          <div class="pw-wrap">
+            <input class="form-input" type="password" name="password" id="spw"
+                   placeholder="Min 8 characters" required minlength="8">
+            <button type="button" class="pw-toggle" onclick="tp('spw')" style="font-size:13px">👁</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Role <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" name="role">
+            <option value="doctor">👨‍⚕️ Doctor</option>
+            <option value="nurse">👩‍⚕️ Nurse</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="min-width:120px">
+          <label class="form-label" style="visibility:hidden">Add</label>
+          <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">
+            + Add Staff
+          </button>
+        </div>
+
+      </div>
+
+      <div style="margin-top:.75rem;font-size:12.5px;color:var(--muted);display:flex;gap:6px;align-items:center">
+        <span>ℹ️</span>
+        <span>The staff member will log in with these credentials. Ask them to change their password after first login via My Profile.</span>
+      </div>
+    </form>
+  </div>
+
+  <!-- ═══ USER MANAGEMENT ═══════════════════════════════════════════ -->
   <div class="page-header fu fu3">
-    <div><div class="page-title">User Management</div><div class="page-sub">Control access, roles, and accounts</div></div>
+    <div>
+      <div class="page-title">User Management</div>
+      <div class="page-sub">All registered accounts — control roles, status, and access</div>
+    </div>
   </div>
 
   <div class="table-wrap fu fu3" style="margin-bottom:2rem">
     <table>
       <thead>
-        <tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Last Login</th><th>Actions</th></tr>
+        <tr>
+          <th>#</th>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Verified</th>
+          <th>Joined</th>
+          <th>Last Login</th>
+          <th>Actions</th>
+        </tr>
       </thead>
       <tbody>
         {% for u in users %}
         <tr>
-          <td class="muted" style="font-family:monospace">{{ u.id }}</td>
+          <td class="muted" style="font-size:12px">{{ u.id }}</td>
           <td>
             <strong>{{ u.username }}</strong>
-            {% if u.id == current_user.id %}<span class="badge badge-teal" style="margin-left:5px">You</span>{% endif %}
+            {% if u.id == current_user.id %}
+              <span class="badge badge-teal" style="margin-left:5px;font-size:10px">You</span>
+            {% endif %}
           </td>
           <td class="muted">{{ u.email }}</td>
+
+          <!-- Role change -->
           <td>
-            <form method="POST" action="{{ url_for('admin_role', uid=u.id) }}" style="display:flex;gap:5px;align-items:center">
+            <form method="POST" action="{{ url_for('admin_role', uid=u.id) }}"
+                  style="display:flex;gap:5px;align-items:center">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-              <select name="role" class="form-select" style="padding:4px 8px;font-size:12px;width:auto;border-radius:5px">
+              <select name="role" class="form-select"
+                      style="padding:4px 8px;font-size:12px;width:auto;border-radius:5px">
                 {% for r in ['viewer','doctor','nurse','admin'] %}
-                <option value="{{ r }}" {% if u.role==r %}selected{% endif %}>{{ r|title }}</option>
+                <option value="{{ r }}" {% if u.role==r %}selected{% endif %}>
+                  {{ {'viewer':'👁 Viewer','doctor':'👨‍⚕️ Doctor',
+                      'nurse':'👩‍⚕️ Nurse','admin':'🛡 Admin'}[r] }}
+                </option>
                 {% endfor %}
               </select>
               <button type="submit" class="btn btn-outline btn-xs">Set</button>
             </form>
           </td>
+
           <td>
             <span class="badge {{ 'badge-green' if u.is_active else 'badge-red' }}">
               {{ 'Active' if u.is_active else 'Inactive' }}
             </span>
           </td>
-          <td class="muted">{{ u.created_at[:10] if u.created_at else '—' }}</td>
-          <td class="muted">{{ u.last_login[:10] if u.last_login else 'Never' }}</td>
+
+          <td>
+            <span class="badge {{ 'badge-green' if u.is_verified else 'badge-grey' }}">
+              {{ '✓ Yes' if u.is_verified else 'Pending' }}
+            </span>
+          </td>
+
+          <td class="muted" style="font-size:12.5px">{{ u.created_at[:10] if u.created_at else '—' }}</td>
+          <td class="muted" style="font-size:12.5px">{{ u.last_login[:10] if u.last_login else 'Never' }}</td>
+
           <td>
             {% if u.id != current_user.id %}
             <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <!-- Enable / Disable -->
               <form method="POST" action="{{ url_for('admin_toggle', uid=u.id) }}" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                <button type="submit" class="btn btn-xs {{ 'btn-danger' if u.is_active else 'btn-success' }}"
+                <button type="submit"
+                        class="btn btn-xs {{ 'btn-danger' if u.is_active else 'btn-success' }}"
                         onclick="return confirm('{{ 'Disable' if u.is_active else 'Enable' }} {{ u.username }}?')">
                   {{ '🔒 Disable' if u.is_active else '🔓 Enable' }}
                 </button>
               </form>
+              <!-- Delete -->
               <form method="POST" action="{{ url_for('admin_delete', uid=u.id) }}" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-xs btn-danger"
@@ -87,31 +179,47 @@
     </table>
   </div>
 
-  <!-- Audit Log -->
+  <!-- ═══ AUDIT LOG ══════════════════════════════════════════════════ -->
   <div class="page-header fu">
     <div><div class="page-title">Audit Log</div><div class="page-sub">Last 120 system events</div></div>
   </div>
+
   <div class="table-wrap fu fu2">
     <table>
-      <thead><tr><th>Time (UTC)</th><th>User</th><th>Action</th><th>Target</th><th>IP</th></tr></thead>
+      <thead>
+        <tr><th>Time (UTC)</th><th>User</th><th>Action</th><th>Target</th><th>IP</th></tr>
+      </thead>
       <tbody>
         {% for log in logs %}
         <tr>
-          <td class="muted" style="white-space:nowrap;font-size:12.5px">{{ log.created_at[:19].replace('T',' ') if log.created_at else '—' }}</td>
-          <td>{{ log.username or '—' }}</td>
-          <td class="audit-action {% if 'FAIL' in log.action or 'DENIED' in log.action or 'DELETE' in log.action %}audit-fail{% endif %}">
+          <td class="muted" style="white-space:nowrap;font-size:12px">
+            {{ log.created_at[:19].replace('T',' ') if log.created_at else '—' }}
+          </td>
+          <td style="font-size:13px">{{ log.username or '—' }}</td>
+          <td class="audit-action
+            {% if 'FAIL' in log.action or 'DENIED' in log.action or 'DELETE' in log.action %}audit-fail{% endif %}">
             {{ log.action }}
           </td>
-          <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">{{ log.target or '—' }}</td>
+          <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">
+            {{ log.target or '—' }}
+          </td>
           <td class="muted" style="font-family:monospace;font-size:12px">{{ log.ip or '—' }}</td>
         </tr>
         {% endfor %}
         {% if not logs %}
-        <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No audit events yet.</td></tr>
+        <tr>
+          <td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No audit events yet.</td>
+        </tr>
         {% endif %}
       </tbody>
     </table>
   </div>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function tp(id){const f=document.getElementById(id);f.type=f.type==='password'?'text':'password';}
+</script>
 {% endblock %}
