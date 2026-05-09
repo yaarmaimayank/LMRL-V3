@@ -77,6 +77,8 @@ def init_db():
             otp_expires   REAL,
             created_at    TEXT    DEFAULT CURRENT_TIMESTAMP,
             last_login    TEXT,
+            reset_token   TEXT,
+            reset_expires REAL,
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         );
         CREATE TABLE IF NOT EXISTS patients (
@@ -134,6 +136,17 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     ''')
+    # Migration: add new columns if they don't exist yet (safe to run multiple times)
+    for migration in [
+        "ALTER TABLE users ADD COLUMN reset_token   TEXT",
+        "ALTER TABLE users ADD COLUMN reset_expires REAL",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     conn.commit()
     conn.close()
 
@@ -712,6 +725,10 @@ def admin_delete(uid):
     conn = get_db()
     u = conn.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
     if u:
+        # Nullify FK references so delete doesn't violate constraints
+        conn.execute('UPDATE patients       SET created_by=NULL WHERE created_by=?', (uid,))
+        conn.execute('UPDATE records        SET created_by=NULL WHERE created_by=?', (uid,))
+        conn.execute('UPDATE prescriptions  SET created_by=NULL WHERE created_by=?', (uid,))
         conn.execute('DELETE FROM users WHERE id=?', (uid,))
         conn.commit()
         audit('USER_DELETED', u['username'])
@@ -797,6 +814,165 @@ def doctor_panel():
     return render_template('doctor_panel.html', my_patients=my_patients,
                            recent_records=recent_records, recent_rx=recent_rx, stats=stats)
 
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  FORGOT / RESET PASSWORD
+# ═══════════════════════════════════════════════════════════════════════
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        check_csrf()
+        email = request.form.get('email', '').strip().lower()
+        if not email:
+            flash('Please enter your email address.', 'error')
+            return render_template('forgot_password.html')
+
+        conn = get_db()
+        user = conn.execute('SELECT * FROM users WHERE email=? AND is_active=1', (email,)).fetchone()
+
+        # Always show success message (security: don't reveal if email exists)
+        if user:
+            token      = secrets.token_urlsafe(48)
+            expires    = time.time() + 3600  # 1 hour
+            conn.execute('UPDATE users SET reset_token=?, reset_expires=? WHERE id=?',
+                         (token, expires, user['id']))
+            conn.commit()
+
+            reset_url = url_for('reset_password', token=token, _external=True)
+            sent = send_reset_email(email, user['username'], reset_url)
+            audit('PASSWORD_RESET_REQUESTED', email)
+
+            if not sent:
+                # Email not configured — show link on screen for dev/testing
+                flash(f'Email not configured. Reset link (dev only): {reset_url}', 'error')
+                conn.close()
+                return render_template('forgot_password.html')
+
+        conn.close()
+        flash('If that email exists in our system, a password reset link has been sent. Check your inbox.', 'success')
+        return redirect(url_for('login'))
+
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+
+    conn = get_db()
+    user = conn.execute(
+        'SELECT * FROM users WHERE reset_token=? AND reset_expires>?',
+        (token, time.time())
+    ).fetchone()
+
+    if not user:
+        conn.close()
+        flash('This reset link is invalid or has expired. Please request a new one.', 'error')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        check_csrf()
+        new_pwd = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+
+        if len(new_pwd) < 8:
+            flash('Password must be at least 8 characters.', 'error')
+            conn.close()
+            return render_template('reset_password.html', token=token)
+        if new_pwd != confirm:
+            flash('Passwords do not match.', 'error')
+            conn.close()
+            return render_template('reset_password.html', token=token)
+
+        pwd_hash, salt = hash_password(new_pwd)
+        conn.execute(
+            'UPDATE users SET password_hash=?, salt=?, reset_token=NULL, reset_expires=NULL WHERE id=?',
+            (pwd_hash, salt, user['id'])
+        )
+        conn.commit()
+        conn.close()
+        audit('PASSWORD_RESET_DONE', user['username'])
+        flash('Password reset successfully! You can now log in with your new password.', 'success')
+        return redirect(url_for('login'))
+
+    conn.close()
+    return render_template('reset_password.html', token=token)
+
+
+def send_reset_email(to_email: str, username: str, reset_url: str) -> bool:
+    """Send password reset link via Resend API."""
+    api_key    = os.environ.get('RESEND_API_KEY', '').strip()
+    email_from = os.environ.get('EMAIL_FROM', 'onboarding@resend.dev').strip()
+
+    print(f"[RESET EMAIL] to={to_email} api_key_set={bool(api_key)}", flush=True)
+
+    if not api_key:
+        print("[RESET EMAIL] RESEND_API_KEY not set", flush=True)
+        return False
+
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#f5f6fa;border-radius:12px">
+      <div style="background:#4f6ef7;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:20px">
+        <div style="font-size:32px">&#9877;</div>
+        <div style="color:#fff;font-size:18px;font-weight:700;margin-top:6px">LMRL Password Reset</div>
+      </div>
+      <div style="background:#fff;border-radius:10px;padding:24px;border:1px solid #e2e5f0">
+        <p style="color:#1a1d2e;font-size:15px;margin-bottom:16px">Hi <strong>{username}</strong>,</p>
+        <p style="color:#4a5068;font-size:14px;margin-bottom:20px">
+          We received a request to reset your LMRL password. Click the button below to set a new password.
+        </p>
+        <div style="text-align:center;margin:24px 0">
+          <a href="{reset_url}"
+             style="background:#4f6ef7;color:#fff;padding:13px 28px;border-radius:8px;
+                    text-decoration:none;font-weight:700;font-size:15px;display:inline-block">
+            Reset My Password
+          </a>
+        </div>
+        <p style="color:#8b91a7;font-size:13px">
+          This link expires in <strong>1 hour</strong>. If you didn't request this, ignore this email — your password will not change.
+        </p>
+        <hr style="border:none;border-top:1px solid #e2e5f0;margin:16px 0">
+        <p style="color:#8b91a7;font-size:11px;word-break:break-all">
+          If the button doesn't work, copy this link: {reset_url}
+        </p>
+      </div>
+    </div>
+    """
+
+    payload = json.dumps({
+        "from":    email_from,
+        "to":      [to_email],
+        "subject": "Reset Your LMRL Password",
+        "html":    html_body,
+        "text":    f"Hi {username},\n\nReset your LMRL password here:\n{reset_url}\n\nExpires in 1 hour.",
+    }).encode('utf-8')
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data    = payload,
+        method  = "POST",
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode()
+            print(f"[RESET EMAIL] Resend {resp.status}: {body}", flush=True)
+            return resp.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        print(f"[RESET EMAIL] HTTP {e.code}: {e.read().decode()}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[RESET EMAIL] Error: {type(e).__name__}: {e}", flush=True)
+        return False
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DASHBOARD

@@ -27,7 +27,13 @@
         <input class="form-input" type="text" name="username" placeholder="Enter your username or email" required autofocus autocomplete="username">
       </div>
       <div class="fg">
-        <label>Password</label>
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          Password
+          <a href="{{ url_for('forgot_password') }}"
+             style="font-size:11.5px;font-weight:400;color:var(--primary);text-decoration:none;text-transform:none;letter-spacing:normal">
+            Forgot password?
+          </a>
+        </label>
         <div class="pw-wrap">
           <input class="form-input" type="password" name="password" id="pw" placeholder="Enter your password" required autocomplete="current-password">
           <button type="button" class="pw-toggle" onclick="tp('pw')">👁</button>
