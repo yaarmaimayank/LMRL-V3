@@ -160,7 +160,7 @@ def send_otp_email(to_email: str, username: str, otp: str) -> bool:
     Falls back gracefully if not configured.
     """
     api_key    = os.environ.get('RESEND_API_KEY', '').strip()
-    email_from = os.environ.get('EMAIL_FROM', 'onboarding@resend.dev').strip()
+    email_from = os.environ.get('EMAIL_FROM', 'admin@lmrl.in').strip()
 
     print(f"[EMAIL] to={to_email} api_key_set={bool(api_key)} from={email_from}", flush=True)
 
@@ -200,6 +200,7 @@ def send_otp_email(to_email: str, username: str, otp: str) -> bool:
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type":  "application/json",
+            "User-Agent": 'LMRL-Capstone/1.0'
         }
     )
 
